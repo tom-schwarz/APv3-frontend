@@ -222,7 +222,7 @@ function DashboardContent() {
                           {citation.location.s3Location.uri}
                         </div>
                         <div className="text-sm">
-                          "{citation.generatedResponsePart.textResponsePart.text.slice(0, 150)}{citation.generatedResponsePart.textResponsePart.text.length > 150 ? '...' : ''}"
+                          &quot;{citation.generatedResponsePart.textResponsePart.text.slice(0, 150)}{citation.generatedResponsePart.textResponsePart.text.length > 150 ? '...' : ''}&quot;
                         </div>
                       </div>
                     </CitationModal>

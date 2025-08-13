@@ -108,7 +108,7 @@ export default function MockupPage() {
   const [chatInput, setChatInput] = useState("")
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingProgress, setStreamingProgress] = useState(0)
-  const [selectedAgencies, setSelectedAgencies] = useState<string[]>(["Victoria Police", "Department of Health"])
+  const [selectedAgencies] = useState<string[]>(["Victoria Police", "Department of Health"])
 
   // Simulate streaming response
   useEffect(() => {
@@ -264,7 +264,7 @@ export default function MockupPage() {
                     <section>
                       <h2 className="text-lg font-semibold mb-2">2. Risk Assessment</h2>
                       <p className="bg-yellow-50 p-3 rounded border-l-4 border-yellow-400">
-                        <strong>Key Point:</strong> Officers must assess the immediate risk to the person and others before determining the appropriate response pathway. This assessment should consider the person's behavior, statements, and environmental factors.
+                        <strong>Key Point:</strong> Officers must assess the immediate risk to the person and others before determining the appropriate response pathway. This assessment should consider the person&apos;s behavior, statements, and environmental factors.
                       </p>
                     </section>
                     
@@ -441,7 +441,7 @@ export default function MockupPage() {
                       </CardHeader>
                       <CardContent className="pt-0">
                         <p className="text-sm text-muted-foreground leading-relaxed">
-                          "{citation.text}"
+                          &quot;{citation.text}&quot;
                         </p>
                         <div className="mt-3 flex items-center gap-2">
                           <Button variant="outline" size="sm" className="h-7 text-xs">

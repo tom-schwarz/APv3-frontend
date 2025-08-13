@@ -153,7 +153,7 @@ export function AppSidebar({ onSelectionChange, ...props }: AppSidebarProps) {
       
       // Find all selected files
       const getAllFiles = (items: FileItem[]): FileItem[] => {
-        let result: FileItem[] = [];
+        const result: FileItem[] = [];
         items.forEach(item => {
           if (item.type === 'file') {
             result.push(item);
