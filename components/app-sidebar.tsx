@@ -54,7 +54,11 @@ interface FileItem {
   agency?: string;
 }
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+interface AppSidebarProps extends React.ComponentProps<typeof Sidebar> {
+  onSelectionChange?: (selectedFiles: Array<{documentId: string, agency: string, title: string}>) => void;
+}
+
+export function AppSidebar({ onSelectionChange, ...props }: AppSidebarProps) {
   const [files, setFiles] = React.useState<FileItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -142,6 +146,38 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }
     
     setCheckedItems(newCheckedItems);
+    
+    // Call the selection change callback if provided
+    if (onSelectionChange) {
+      const selectedFiles: Array<{documentId: string, agency: string, title: string}> = [];
+      
+      // Find all selected files
+      const getAllFiles = (items: FileItem[]): FileItem[] => {
+        let result: FileItem[] = [];
+        items.forEach(item => {
+          if (item.type === 'file') {
+            result.push(item);
+          }
+          if (item.children) {
+            result.push(...getAllFiles(item.children));
+          }
+        });
+        return result;
+      };
+      
+      const allFiles = getAllFiles(files);
+      allFiles.forEach(file => {
+        if (newCheckedItems.has(file.path) && file.document && file.agency) {
+          selectedFiles.push({
+            documentId: file.document.id,
+            agency: file.agency,
+            title: file.document.title
+          });
+        }
+      });
+      
+      onSelectionChange(selectedFiles);
+    }
   };
 
   const isItemChecked = (item: FileItem) => {
