@@ -1,20 +1,39 @@
 "use client"
 
-import { AppSidebar } from "@/components/app-sidebar"
-import { Separator } from "@/components/ui/separator"
-import {
-  SidebarInset,
-  SidebarProvider,
-  SidebarTrigger,
-} from "@/components/ui/sidebar"
+import { useState, useEffect, Suspense } from "react"
+import { useSearchParams, useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Separator } from "@/components/ui/separator"
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Progress } from "@/components/ui/progress"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { CitationModal } from "@/components/citation-modal"
-import { useSearchParams, useRouter } from "next/navigation"
-import { Suspense, useState } from "react"
+import { Checkbox } from "@/components/ui/checkbox"
 import dynamic from "next/dynamic"
+import Image from "next/image"
 import "react-pdf/dist/Page/AnnotationLayer.css"
 import "react-pdf/dist/Page/TextLayer.css"
+import { 
+  FileText, 
+  Send, 
+  Quote, 
+  User,
+  Bot,
+  Search,
+  Filter,
+  CheckCircle2,
+  Clock,
+  ExternalLink,
+  Folder,
+  FolderOpen,
+  MessageSquare,
+  MoreVertical
+} from "lucide-react"
 
 const PDFViewer = dynamic(
   () => import("@/components/pdf-viewer").then(mod => mod.PDFViewer),
@@ -49,39 +68,172 @@ interface Citation {
   relevance_score?: number;
 }
 
-interface ChatResponse {
-  answer: string;
-  citations: Citation[];
-  session_id: string;
+interface ChatMessage {
+  id: string;
+  type: 'user' | 'assistant';
+  content: string;
+  timestamp: string;
+  citations?: Citation[];
 }
 
-function DashboardContent() {
+interface DocumentTreeNode {
+  name: string;
+  type: 'agency' | 'document';
+  children?: DocumentTreeNode[];
+  documentId?: string;
+  status?: 'ready' | 'processing';
+  pages?: number;
+  indexed_in_kb?: boolean;
+}
+
+function FunctionalMockupContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const documentId = searchParams.get('doc')
-  const agency = searchParams.get('agency')
+  // const agency = searchParams.get('agency') // Unused in current implementation
   const initialPage = searchParams.get('page')
+  
+  // State from original functional page
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
   const [query, setQuery] = useState('')
   const [citations, setCitations] = useState<Citation[]>([])
   const [llmResponse, setLlmResponse] = useState<string>('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [documentTree, setDocumentTree] = useState<DocumentTreeNode[]>([])
+  
+  // New state for mockup UI
+  const [selectedDocument, setSelectedDocument] = useState<string | null>(documentId)
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [expandedAgencies, setExpandedAgencies] = useState<Set<string>>(new Set())
+  const [activeTab, setActiveTab] = useState('chat')
   
   // Build document server URL if we have a document ID
-  const documentUrl = documentId 
-    ? `${process.env.NEXT_PUBLIC_DOCUMENT_SERVER_URL || 'https://xim3ozqibklhc6hz5uln4afiba0hprrn.lambda-url.ap-southeast-2.on.aws/'}${documentId}`
+  const documentUrl = selectedDocument 
+    ? `${process.env.NEXT_PUBLIC_DOCUMENT_SERVER_URL || 'https://xim3ozqibklhc6hz5uln4afiba0hprrn.lambda-url.ap-southeast-2.on.aws/'}${selectedDocument}`
     : null
-  
-  const displayTitle = agency && documentId 
-    ? `${decodeURIComponent(agency)} - Document`
-    : documentId 
-    ? `Document: ${documentId}`
-    : 'Select a document'
 
-  const handleSelectionChange = (files: SelectedFile[]) => {
-    setSelectedFiles(files)
+  // Load document tree on mount
+  useEffect(() => {
+    const loadDocumentTree = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_DOCUMENTS_API_URL || 'https://7hixztmew2qha5brfzg4zqu7nq0ccadh.lambda-url.ap-southeast-2.on.aws/'
+        const response = await fetch(apiUrl)
+        if (response.ok) {
+          const data = await response.json()
+          // Convert object format to array format for our tree structure
+          const agenciesArray = Object.keys(data.agencies || {}).map(agencyName => ({
+            name: agencyName,
+            type: 'agency' as const,
+            children: (data.agencies[agencyName]?.documents || []).map((doc: { id: string; title: string; status: string; indexed_in_kb: boolean }) => ({
+              name: doc.title,
+              type: 'document' as const,
+              documentId: doc.id,
+              status: doc.status === 'processed' ? 'ready' : 'processing',
+              indexed_in_kb: doc.indexed_in_kb,
+              pages: undefined // Not available in current API
+            }))
+          }))
+          setDocumentTree(agenciesArray)
+          // Auto-expand agencies that have documents
+          const agenciesWithDocs = agenciesArray.filter((a) => a.children?.length > 0).map((a) => a.name)
+          setExpandedAgencies(new Set(agenciesWithDocs.slice(0, 2))) // Expand first 2 agencies
+        }
+      } catch (error) {
+        console.error('Failed to load document tree:', error)
+      }
+    }
+    loadDocumentTree()
+  }, [])
+
+  // Update selected document when URL changes
+  useEffect(() => {
+    if (documentId) {
+      setSelectedDocument(documentId)
+    }
+  }, [documentId])
+
+  const handleDocumentClick = (doc: DocumentTreeNode, agency: string) => {
+    if (doc.documentId && doc.type === 'document') {
+      setSelectedDocument(doc.documentId)
+      const params = new URLSearchParams()
+      params.set('doc', doc.documentId)
+      params.set('agency', encodeURIComponent(agency))
+      router.push(`/?${params.toString()}`)
+    }
   }
+
+  const handleDocumentCheckboxChange = (doc: DocumentTreeNode, agency: string, checked: boolean) => {
+    if (doc.documentId && doc.type === 'document') {
+      if (checked) {
+        setSelectedFiles(prev => [...prev, {
+          documentId: doc.documentId!,
+          agency: agency,
+          title: doc.name
+        }])
+      } else {
+        setSelectedFiles(prev => prev.filter(f => f.documentId !== doc.documentId))
+      }
+    }
+  }
+
+  const handleAgencyCheckboxChange = (agency: DocumentTreeNode, checked: boolean) => {
+    if (agency.children && agency.type === 'agency') {
+      if (checked) {
+        // Add all documents in this agency
+        const newFiles = agency.children
+          .filter(doc => doc.documentId && doc.type === 'document')
+          .map(doc => ({
+            documentId: doc.documentId!,
+            agency: agency.name,
+            title: doc.name
+          }))
+          .filter(newFile => !selectedFiles.some(existing => existing.documentId === newFile.documentId))
+        
+        setSelectedFiles(prev => [...prev, ...newFiles])
+      } else {
+        // Remove all documents from this agency
+        setSelectedFiles(prev => prev.filter(f => f.agency !== agency.name))
+      }
+    }
+  }
+
+  const handleSelectAllDocuments = () => {
+    const allFiles: SelectedFile[] = []
+    documentTree.forEach(agency => {
+      if (agency.children) {
+        agency.children.forEach(doc => {
+          if (doc.documentId && doc.type === 'document') {
+            allFiles.push({
+              documentId: doc.documentId,
+              agency: agency.name,
+              title: doc.name
+            })
+          }
+        })
+      }
+    })
+    setSelectedFiles(allFiles)
+  }
+
+  const handleDeselectAllDocuments = () => {
+    setSelectedFiles([])
+  }
+
+  const handleAgencyToggle = (agencyName: string) => {
+    const newExpanded = new Set(expandedAgencies)
+    if (newExpanded.has(agencyName)) {
+      newExpanded.delete(agencyName)
+    } else {
+      newExpanded.add(agencyName)
+    }
+    setExpandedAgencies(newExpanded)
+  }
+
+
+  // const handleSelectionChange = (files: SelectedFile[]) => {
+  //   setSelectedFiles(files)
+  // } // Unused in current implementation
 
   const handleCitationClick = (citation: Citation) => {
     const documentId = citation.document_id
@@ -99,10 +251,11 @@ function DashboardContent() {
       }
       
       router.push(`/?${params.toString()}`)
+      setSelectedDocument(documentId)
     }
   }
 
-  const handleQuerySubmit = async () => {
+  const handleSendMessage = async () => {
     if (!query.trim()) {
       setError('Please enter a query')
       return
@@ -113,16 +266,23 @@ function DashboardContent() {
       return
     }
 
+    // Add user message to chat
+    const userMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      type: 'user',
+      content: query,
+      timestamp: new Date().toISOString()
+    }
+    setChatMessages(prev => [...prev, userMessage])
+
     setLoading(true)
     setError(null)
     setCitations([])
     setLlmResponse('')
 
     try {
-      // Create URL with query parameters for streaming
       const apiUrl = process.env.NEXT_PUBLIC_CHAT_API_URL || 'https://gtgyd2z7zbqjdyqe26fwziq4ue0haagc.lambda-url.ap-southeast-2.on.aws/'
       
-      // Use fetch to POST the query, then immediately create EventSource for streaming
       const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
@@ -142,13 +302,21 @@ function DashboardContent() {
         throw new Error(`Failed to submit query: ${response.status}`)
       }
 
-      // Check if response is event-stream
       const contentType = response.headers.get('content-type')
       if (!contentType?.includes('text/event-stream') && !contentType?.includes('application/octet-stream')) {
-        // Fallback to JSON response for non-streaming
-        const data: ChatResponse = await response.json()
+        const data = await response.json()
         setCitations(data.citations || [])
         setLlmResponse(data.answer || '')
+        
+        // Add assistant message
+        const assistantMessage: ChatMessage = {
+          id: `msg-${Date.now() + 1}`,
+          type: 'assistant',
+          content: data.answer || '',
+          timestamp: new Date().toISOString(),
+          citations: data.citations || []
+        }
+        setChatMessages(prev => [...prev, assistantMessage])
         return
       }
 
@@ -162,6 +330,8 @@ function DashboardContent() {
 
       let buffer = ''
       let currentEvent = ''
+      let streamingResponse = ''
+      let streamingCitations: Citation[] = []
       
       try {
         while (true) {
@@ -171,11 +341,10 @@ function DashboardContent() {
           
           buffer += decoder.decode(value, { stream: true })
           const lines = buffer.split('\n')
-          buffer = lines.pop() || '' // Keep incomplete line in buffer
+          buffer = lines.pop() || ''
           
           for (const line of lines) {
             if (line.trim() === '') {
-              // Empty line indicates end of event
               currentEvent = ''
               continue
             }
@@ -192,26 +361,35 @@ function DashboardContent() {
                 const parsed = JSON.parse(data)
                 
                 if (currentEvent === 'citations' || (parsed.citations && Array.isArray(parsed.citations))) {
-                  setCitations(parsed.citations || [])
+                  streamingCitations = parsed.citations || []
+                  setCitations(streamingCitations)
+                  // Show citations tab when citations arrive
+                  if (streamingCitations.length > 0) {
+                    setActiveTab('citations')
+                  }
                 } else if (currentEvent === 'delta' || parsed.text) {
-                  setLlmResponse(prev => prev + (parsed.text || ''))
+                  const newText = parsed.text || ''
+                  streamingResponse += newText
+                  setLlmResponse(streamingResponse)
+                  // Switch back to chat tab when response starts
+                  if (newText && activeTab === 'citations') {
+                    setActiveTab('chat')
+                  }
                 } else if (currentEvent === 'error' || parsed.message) {
                   throw new Error(parsed.message || 'Stream error')
                 } else if (currentEvent === 'end' || parsed.done) {
-                  // Stream completed
+                  // Add complete assistant message
+                  const assistantMessage: ChatMessage = {
+                    id: `msg-${Date.now() + 1}`,
+                    type: 'assistant',
+                    content: streamingResponse,
+                    timestamp: new Date().toISOString(),
+                    citations: streamingCitations
+                  }
+                  setChatMessages(prev => [...prev, assistantMessage])
                   return
-                } else if (currentEvent === 'start') {
-                  // Stream started - could show initial message
-                  console.log('Stream started:', parsed.message)
-                } else if (currentEvent === 'metadata') {
-                  // Metadata received - could show context stats
-                  console.log('Metadata:', parsed)
-                } else if (currentEvent === 'ping') {
-                  // Heartbeat - ignore
-                  continue
                 }
               } catch (parseError) {
-                // Skip invalid JSON lines
                 console.debug('Skipping invalid JSON:', data, parseError)
               }
             }
@@ -226,165 +404,447 @@ function DashboardContent() {
       setError(err instanceof Error ? err.message : 'Failed to submit query')
     } finally {
       setLoading(false)
+      setQuery('') // Clear input after sending
     }
   }
-  
+
+  const getSelectedDocumentInfo = () => {
+    if (!selectedDocument || !Array.isArray(documentTree)) return null
+    
+    for (const agency of documentTree) {
+      if (agency.children) {
+        for (const doc of agency.children) {
+          if (doc.documentId === selectedDocument) {
+            return { document: doc, agency: agency.name }
+          }
+        }
+      }
+    }
+    return null
+  }
+
+  const selectedDocInfo = getSelectedDocumentInfo()
+  const selectedAgencies = Array.from(new Set(selectedFiles.map(f => f.agency)))
+
   return (
-    <SidebarProvider>
-      <AppSidebar onSelectionChange={handleSelectionChange} />
-      <SidebarInset>
-        <header className="flex h-16 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-[orientation=vertical]:h-4"
+    <div className="h-screen flex flex-col bg-background">
+      {/* Header */}
+      <header className="flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6">
+        <div className="flex items-center gap-2">
+          <Image 
+            src="/360_bulb_logo.png" 
+            alt="360 Logo" 
+            width={28} 
+            height={28} 
+            className="rounded-full"
           />
-          <div className="flex-1">
-            <h2 className="text-lg font-semibold">
-              {displayTitle}
-            </h2>
-            {agency && (
-              <p className="text-sm text-muted-foreground">
-                {decodeURIComponent(agency)}
-              </p>
-            )}
-          </div>
-        </header>
-        <div className="flex-1 p-4 space-y-4">
-          {/* Query Testing Interface */}
-          <div className="border rounded-lg p-4 bg-card">
-            <h3 className="text-lg font-semibold mb-4">Query Testing</h3>
-            
-            {/* Selected Files Display */}
-            <div className="mb-4">
-              <p className="text-sm font-medium mb-2">
-                Selected Files ({selectedFiles.length}):
-              </p>
-              {selectedFiles.length > 0 ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                  {selectedFiles.map((file, index) => (
-                    <div key={index} className="text-xs bg-blue-50 dark:bg-blue-950 p-2 rounded border">
-                      <div className="font-medium">{file.title}</div>
-                      <div className="text-muted-foreground">{file.agency}</div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">No files selected</p>
-              )}
-            </div>
+          <h1 className="font-semibold">AskPolicy</h1>
+        </div>
+      </header>
 
-            {/* Query Input */}
-            <div className="space-y-3">
-              <Input
-                placeholder="Enter your query..."
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && !loading && handleQuerySubmit()}
-              />
-              <Button 
-                onClick={handleQuerySubmit} 
-                disabled={loading || !query.trim() || selectedFiles.length === 0}
-                className="w-full"
-              >
-                {loading ? 'Querying...' : 'Test Query'}
-              </Button>
-            </div>
-
-            {/* Error Display */}
-            {error && (
-              <div className="mt-3 p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-red-700 dark:text-red-300 text-sm">
-                {error}
+      <ResizablePanelGroup direction="horizontal" className="flex-1">
+        {/* File Browser Panel */}
+        <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
+          <div className="flex flex-col h-full">
+            <div className="p-4 border-b">
+              <div className="flex items-center gap-2 mb-3">
+                <Folder className="h-4 w-4" />
+                <h2 className="font-semibold text-sm">Document Browser</h2>
               </div>
-            )}
-
-            {/* LLM Response Display */}
-            {llmResponse && (
-              <div className="mt-4">
-                <h4 className="font-medium mb-2">AI Response:</h4>
-                <div className="border rounded-lg p-4 bg-green-50 dark:bg-green-950/30">
-                  <div className="prose prose-sm max-w-none dark:prose-invert">
-                    <div className="whitespace-pre-wrap leading-relaxed">
-                      {llmResponse}
+              <div className="flex gap-2 mb-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSelectAllDocuments}
+                  className="flex-1 h-8 text-xs"
+                >
+                  Select All
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDeselectAllDocuments}
+                  className="flex-1 h-8 text-xs"
+                >
+                  Clear All
+                </Button>
+              </div>
+              <div className="relative">
+                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search documents..."
+                  className="pl-8 h-9"
+                />
+              </div>
+            </div>
+            
+            <ScrollArea className="flex-1 p-4">
+              <div className="space-y-3">
+                {Array.isArray(documentTree) && documentTree.map((agency) => {
+                  const agencyDocuments = agency.children?.filter(doc => doc.documentId && doc.type === 'document') || []
+                  const selectedAgencyDocs = selectedFiles.filter(f => f.agency === agency.name)
+                  const isAgencyFullySelected = agencyDocuments.length > 0 && selectedAgencyDocs.length === agencyDocuments.length
+                  const isAgencyPartiallySelected = selectedAgencyDocs.length > 0 && selectedAgencyDocs.length < agencyDocuments.length
+                  
+                  return (
+                  <div key={agency.name} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={isAgencyFullySelected}
+                          ref={(el) => {
+                            if (el && isAgencyPartiallySelected) {
+                              const checkbox = el as HTMLInputElement;
+                              checkbox.indeterminate = true;
+                            }
+                          }}
+                          onCheckedChange={(checked) => handleAgencyCheckboxChange(agency, checked as boolean)}
+                          className="h-3 w-3"
+                        />
+                        <div 
+                          className="flex items-center gap-2 cursor-pointer"
+                          onClick={() => handleAgencyToggle(agency.name)}
+                        >
+                          {expandedAgencies.has(agency.name) ? (
+                            <FolderOpen className="h-4 w-4 text-blue-500" />
+                          ) : (
+                            <Folder className="h-4 w-4 text-muted-foreground" />
+                          )}
+                          <span className="text-sm font-medium">{agency.name}</span>
+                        </div>
+                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        {agency.children?.length || 0}
+                      </Badge>
                     </div>
+                    
+                    {expandedAgencies.has(agency.name) && agency.children && (
+                      <div className="ml-6 space-y-1">
+                        {agency.children.map((doc) => {
+                          const isSelected = selectedFiles.some(f => f.documentId === doc.documentId)
+                          const isViewing = selectedDocument === doc.documentId
+                          return (
+                          <div
+                            key={doc.documentId || doc.name}
+                            className={`flex items-center gap-2 p-2 rounded-md text-xs transition-colors ${
+                              isViewing
+                                ? "bg-primary/10 text-primary"
+                                : "hover:bg-muted/50"
+                            }`}
+                          >
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(checked) => handleDocumentCheckboxChange(doc, agency.name, checked as boolean)}
+                              className="h-3 w-3"
+                            />
+                            <FileText className="h-3 w-3" />
+                            <div 
+                              className="flex-1 min-w-0 cursor-pointer"
+                              onClick={() => handleDocumentClick(doc, agency.name)}
+                            >
+                              <div className="truncate font-medium hover:underline">{doc.name}</div>
+                              {doc.pages && (
+                                <div className="text-muted-foreground">{doc.pages} pages</div>
+                              )}
+                            </div>
+                            <div className="flex-shrink-0">
+                              {doc.indexed_in_kb ? (
+                                <CheckCircle2 className="h-3 w-3 text-green-500" />
+                              ) : (
+                                <Clock className="h-3 w-3 text-orange-500" />
+                              )}
+                            </div>
+                          </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                  )
+                }) || null}
+              </div>
+            </ScrollArea>
+          </div>
+        </ResizablePanel>
+
+        <ResizableHandle withHandle />
+
+        {/* PDF Viewer Panel */}
+        <ResizablePanel defaultSize={40} minSize={30}>
+          <div className="flex flex-col h-full">
+            <div className="p-4 border-b">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="font-semibold text-sm">
+                    {selectedDocInfo ? selectedDocInfo.document.name : "Select a document"}
+                  </h3>
+                  {selectedDocInfo && (
+                    <p className="text-xs text-muted-foreground">
+                      {selectedDocInfo.agency} • Page {initialPage || 1} of {selectedDocInfo.document.pages || '?'}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm">
+                    <ExternalLink className="h-3 w-3 mr-1" />
+                    Open
+                  </Button>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex-1">
+              {documentUrl ? (
+                <PDFViewer 
+                  filePath={documentUrl} 
+                  initialPage={initialPage ? parseInt(initialPage) : undefined}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-center text-muted-foreground bg-muted/30">
+                  <div>
+                    <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Select a document from the browser to view</p>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </div>
+          </div>
+        </ResizablePanel>
 
-            {/* Citations Display */}
-            {citations.length > 0 && (
-              <div className="mt-4">
-                <h4 className="font-medium mb-2">Citations ({citations.length}):</h4>
-                <div className="space-y-2 max-h-64 overflow-y-auto">
-                  {citations.map((citation, index) => (
-                    <div key={index} className="space-y-2">
-                      <CitationModal citation={citation} index={index} onViewInDocument={handleCitationClick}>
-                        <div className="border rounded p-3 bg-muted/50 hover:bg-muted/70 cursor-pointer transition-colors">
-                          <div className="text-sm font-medium mb-1 flex items-center justify-between">
-                            <span>
-                              Source: {citation.location.s3Location.uri.split('/').pop()?.replace('.pdf', '') || 'Unknown'}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              Click to expand
-                            </span>
+        <ResizableHandle withHandle />
+
+        {/* Chat & Citations Panel */}
+        <ResizablePanel defaultSize={40} minSize={30}>
+          <div className="flex flex-col h-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
+              <div className="border-b px-4 pt-4">
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="chat" className="flex items-center gap-2">
+                    <MessageSquare className="h-4 w-4" />
+                    Chat
+                  </TabsTrigger>
+                  <TabsTrigger value="citations" className="flex items-center gap-2">
+                    <Quote className="h-4 w-4" />
+                    Citations ({citations.length})
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              <div className="flex-1 overflow-hidden">
+                <TabsContent value="chat" className="h-full flex flex-col m-0 data-[state=active]:flex">
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-hidden">
+                    <ScrollArea className="h-full p-2">
+                      <div className="space-y-2">
+                  {chatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className={`flex gap-3 ${
+                        message.type === "user" ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      {message.type === "assistant" && (
+                        <Avatar className="h-8 w-8 mt-1">
+                          <AvatarFallback>
+                            <Bot className="h-4 w-4" />
+                          </AvatarFallback>
+                        </Avatar>
+                      )}
+                      
+                      <Card className={`max-w-[80%] ${
+                        message.type === "user" 
+                          ? "bg-primary text-primary-foreground" 
+                          : "bg-muted/50"
+                      }`}>
+                        <CardContent className="p-2">
+                          <div className="text-sm whitespace-pre-wrap">
+                            {message.content}
                           </div>
-                          <div className="text-xs text-muted-foreground mb-2 truncate">
-                            {citation.location.s3Location.uri}
-                          </div>
-                          {citation.page_numbers && citation.page_numbers.length > 0 && (
-                            <div className="text-xs text-blue-600 dark:text-blue-400 mb-2">
-                              Pages: {citation.page_numbers.join(', ')}
-                            </div>
-                          )}
-                          <div className="text-sm">
-                            &quot;{citation.generatedResponsePart.textResponsePart.text.slice(0, 150)}{citation.generatedResponsePart.textResponsePart.text.length > 150 ? '...' : ''}&quot;
-                          </div>
-                        </div>
-                      </CitationModal>
-                      {citation.document_id && citation.agency && (
-                        <Button
-                          onClick={() => handleCitationClick(citation)}
-                          variant="outline"
-                          size="sm"
-                          className="w-full text-xs"
-                        >
-                          📄 View in Document
-                          {citation.page_numbers && citation.page_numbers.length > 0 && (
-                            <span className="ml-1">(Page {citation.page_numbers[0]})</span>
-                          )}
-                        </Button>
+                        </CardContent>
+                      </Card>
+                      
+                      {message.type === "user" && (
+                        <Avatar className="h-8 w-8 mt-1">
+                          <AvatarFallback>
+                            <User className="h-4 w-4" />
+                          </AvatarFallback>
+                        </Avatar>
                       )}
                     </div>
                   ))}
-                </div>
-              </div>
-            )}
-          </div>
+                  
+                  {loading && (
+                    <div className="flex gap-3">
+                      <Avatar className="h-8 w-8 mt-1">
+                        <AvatarFallback>
+                          <Bot className="h-4 w-4" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <Card className="max-w-[80%] bg-muted/50">
+                        <CardContent className="p-2">
+                          <div className="space-y-2">
+                            <div className="text-sm text-muted-foreground">Analyzing documents...</div>
+                            <Progress value={undefined} className="h-1" />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
 
-          {/* PDF Viewer */}
-          <div className="flex-1 min-h-96">
-            {documentUrl ? (
-              <PDFViewer 
-                filePath={documentUrl} 
-                initialPage={initialPage ? parseInt(initialPage) : undefined}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-64 text-muted-foreground border rounded-lg">
-                Select a document from the sidebar to view it
+                  {/* Show streaming response if available */}
+                  {llmResponse && !chatMessages.find(m => m.content === llmResponse) && (
+                    <div className="flex gap-3">
+                      <Avatar className="h-8 w-8 mt-1">
+                        <AvatarFallback>
+                          <Bot className="h-4 w-4" />
+                        </AvatarFallback>
+                      </Avatar>
+                      <Card className="max-w-[80%] bg-muted/50">
+                        <CardContent className="p-2">
+                          <div className="text-sm whitespace-pre-wrap">
+                            {llmResponse}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    </div>
+                  )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className="border-t p-4 bg-background">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Ask about mental health policies..."
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && !loading && handleSendMessage()}
+                        disabled={loading}
+                      />
+                      <Button
+                        size="icon"
+                        onClick={handleSendMessage}
+                        disabled={!query.trim() || loading || selectedFiles.length === 0}
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    
+                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Filter className="h-3 w-3" />
+                      <span>Searching across {selectedAgencies.length} selected agencies</span>
+                    </div>
+
+                    {/* Error Display */}
+                    {error && (
+                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-red-700 dark:text-red-300 text-xs">
+                        {error}
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="citations" className="h-full m-0 data-[state=active]:flex">
+                  <ScrollArea className="h-full p-4">
+                    {citations.length > 0 ? (
+                      <div className="space-y-3">
+                    {citations.map((citation, index) => {
+                      const sourceNumber = (citation.source_number || index + 1)
+                      
+                      return (
+                        <div 
+                          key={index} 
+                          id={`citation-${sourceNumber}`}
+                        >
+                          <CitationModal citation={citation} index={index} onViewInDocument={handleCitationClick}>
+                            <Card className="border hover:bg-muted/30 transition-colors cursor-pointer">
+                              <CardHeader className="pb-3">
+                                <div className="flex items-start justify-between">
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-bold bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
+                                        {sourceNumber}
+                                      </span>
+                                      <CardTitle className="text-sm font-medium">
+                                        {citation.title || citation.document_id || citation.location.s3Location.uri.split('/').pop()?.replace('.pdf', '') || 'Unknown'}
+                                      </CardTitle>
+                                    </div>
+                                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                  <span>{citation.agency || 'Unknown Agency'}</span>
+                                  <Separator orientation="vertical" className="h-3" />
+                                  <span>
+                                    {citation.page_numbers && citation.page_numbers.length > 0 
+                                      ? `Page ${citation.page_numbers.join(', ')}`
+                                      : 'Page unknown'
+                                    }
+                                  </span>
+                                </div>
+                              </div>
+                                <div className="flex items-center gap-2">
+                                  {citation.relevance_score && (
+                                    <Badge variant="secondary" className="text-xs">
+                                      {Math.round(citation.relevance_score * 100)}% match
+                                    </Badge>
+                                  )}
+                                  <Button variant="ghost" size="icon" className="h-6 w-6">
+                                    <MoreVertical className="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            </CardHeader>
+                            <CardContent className="pt-0">
+                              <p className="text-sm text-muted-foreground leading-relaxed">
+                                &ldquo;{citation.generatedResponsePart.textResponsePart.text.slice(0, 200)}{citation.generatedResponsePart.textResponsePart.text.length > 200 ? '...' : ''}&rdquo;
+                              </p>
+                              <div className="mt-3 flex items-center gap-2">
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="h-7 text-xs"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleCitationClick(citation)
+                                  }}
+                                >
+                                  <ExternalLink className="h-3 w-3 mr-1" />
+                                  View in document
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-7 text-xs">
+                                  <Quote className="h-3 w-3 mr-1" />
+                                  Copy citation
+                                </Button>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        </CitationModal>
+                      </div>
+                    )
+                  })}
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-center text-muted-foreground">
+                        <div>
+                          <Quote className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                          <p>Citations will appear here after you submit a query</p>
+                        </div>
+                      </div>
+                    )}
+                  </ScrollArea>
+                </TabsContent>
               </div>
-            )}
+            </Tabs>
           </div>
-        </div>
-      </SidebarInset>
-    </SidebarProvider>
+        </ResizablePanel>
+      </ResizablePanelGroup>
+    </div>
   )
 }
 
-export default function Page() {
+export default function FunctionalMockupPage() {
   return (
     <Suspense fallback={<div>Loading...</div>}>
-      <DashboardContent />
+      <FunctionalMockupContent />
     </Suspense>
   )
 }
