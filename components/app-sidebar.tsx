@@ -98,7 +98,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const handleFileClick = (file: FileItem) => {
     if (file.type === 'file' && file.document) {
       // Use document ID for navigation instead of PDF path
-      router.push(`/dashboard?doc=${file.document.id}&agency=${file.agency}`);
+      router.push(`/?doc=${file.document.id}&agency=${file.agency}`);
     }
   };
 

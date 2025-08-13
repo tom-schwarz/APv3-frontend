@@ -23,7 +23,19 @@ const PDFViewer = dynamic(
 
 function DashboardContent() {
   const searchParams = useSearchParams()
-  const selectedFile = searchParams.get('file')
+  const documentId = searchParams.get('doc')
+  const agency = searchParams.get('agency')
+  
+  // Build document server URL if we have a document ID
+  const documentUrl = documentId 
+    ? `${process.env.NEXT_PUBLIC_DOCUMENT_SERVER_URL || 'https://xim3ozqibklhc6hz5uln4afiba0hprrn.lambda-url.ap-southeast-2.on.aws/'}${documentId}`
+    : null
+  
+  const displayTitle = agency && documentId 
+    ? `${decodeURIComponent(agency)} - Document`
+    : documentId 
+    ? `Document: ${documentId}`
+    : 'Select a document'
   
   return (
     <SidebarProvider>
@@ -37,16 +49,21 @@ function DashboardContent() {
           />
           <div className="flex-1">
             <h2 className="text-lg font-semibold">
-              {selectedFile ? decodeURIComponent(selectedFile) : 'Select a PDF file'}
+              {displayTitle}
             </h2>
+            {agency && (
+              <p className="text-sm text-muted-foreground">
+                {decodeURIComponent(agency)}
+              </p>
+            )}
           </div>
         </header>
         <div className="flex-1 p-4">
-          {selectedFile ? (
-            <PDFViewer filePath={`/${decodeURIComponent(selectedFile)}`} />
+          {documentUrl ? (
+            <PDFViewer filePath={documentUrl} />
           ) : (
             <div className="flex items-center justify-center h-[calc(100vh-8rem)] text-muted-foreground">
-              Select a PDF file from the sidebar to view it
+              Select a document from the sidebar to view it
             </div>
           )}
         </div>
