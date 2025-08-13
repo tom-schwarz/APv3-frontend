@@ -10,8 +10,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { ExternalLink } from "lucide-react"
 
 interface Citation {
   location: {
@@ -36,9 +38,10 @@ interface CitationModalProps {
   citation: Citation;
   index: number;
   children: React.ReactNode;
+  onViewInDocument?: (citation: Citation) => void;
 }
 
-export function CitationModal({ citation, index, children }: CitationModalProps) {
+export function CitationModal({ citation, index, children, onViewInDocument }: CitationModalProps) {
   const extractFilename = (uri: string) => {
     return uri.split('/').pop()?.replace('.pdf', '') || 'Unknown';
   };
@@ -111,6 +114,25 @@ export function CitationModal({ citation, index, children }: CitationModalProps)
                 </p>
               </div>
             </div>
+
+            {/* View in Document Button */}
+            {citation.document_id && citation.agency && onViewInDocument && (
+              <div>
+                <Button
+                  onClick={() => onViewInDocument(citation)}
+                  className="w-full"
+                  variant="default"
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  View in Document
+                  {citation.page_numbers && citation.page_numbers.length > 0 && (
+                    <span className="ml-1">(Page {citation.page_numbers[0]})</span>
+                  )}
+                </Button>
+              </div>
+            )}
+
+            <Separator />
 
             {/* Raw JSON Section for debugging */}
             <div>

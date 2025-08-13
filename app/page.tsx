@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CitationModal } from "@/components/citation-modal"
-import { useSearchParams } from "next/navigation"
+import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense, useState } from "react"
 import dynamic from "next/dynamic"
 import "react-pdf/dist/Page/AnnotationLayer.css"
@@ -41,6 +41,12 @@ interface Citation {
       text: string;
     };
   };
+  source_number?: number;
+  document_id?: string;
+  title?: string;
+  agency?: string;
+  page_numbers?: number[];
+  relevance_score?: number;
 }
 
 interface ChatResponse {
@@ -51,8 +57,10 @@ interface ChatResponse {
 
 function DashboardContent() {
   const searchParams = useSearchParams()
+  const router = useRouter()
   const documentId = searchParams.get('doc')
   const agency = searchParams.get('agency')
+  const initialPage = searchParams.get('page')
   const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([])
   const [query, setQuery] = useState('')
   const [citations, setCitations] = useState<Citation[]>([])
@@ -75,6 +83,25 @@ function DashboardContent() {
     setSelectedFiles(files)
   }
 
+  const handleCitationClick = (citation: Citation) => {
+    const documentId = citation.document_id
+    const agency = citation.agency
+    const pageNumbers = citation.page_numbers
+    
+    if (documentId && agency) {
+      const params = new URLSearchParams()
+      params.set('doc', documentId)
+      params.set('agency', agency)
+      
+      // Navigate to first page if page numbers are available
+      if (pageNumbers && pageNumbers.length > 0) {
+        params.set('page', pageNumbers[0].toString())
+      }
+      
+      router.push(`/?${params.toString()}`)
+    }
+  }
+
   const handleQuerySubmit = async () => {
     if (!query.trim()) {
       setError('Please enter a query')
@@ -92,15 +119,22 @@ function DashboardContent() {
     setLlmResponse('')
 
     try {
-      const response = await fetch(process.env.NEXT_PUBLIC_CHAT_API_URL || 'https://ihknhh6c3ukc2kf7krsgzadryq0cbytd.lambda-url.ap-southeast-2.on.aws/', {
+      // Create URL with query parameters for streaming
+      const apiUrl = process.env.NEXT_PUBLIC_CHAT_API_URL || 'https://gtgyd2z7zbqjdyqe26fwziq4ue0haagc.lambda-url.ap-southeast-2.on.aws/'
+      
+      // Use fetch to POST the query, then immediately create EventSource for streaming
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
         },
         body: JSON.stringify({
-          query: query,
-          selected_agencies: Array.from(new Set(selectedFiles.map(f => f.agency))),
-          session_id: `test-${Date.now()}`
+          message: query,
+          selected_items: {
+            agencies: Array.from(new Set(selectedFiles.map(f => f.agency)))
+          },
+          session_id: `session-${Date.now()}`
         })
       })
 
@@ -108,9 +142,85 @@ function DashboardContent() {
         throw new Error(`Failed to submit query: ${response.status}`)
       }
 
-      const data: ChatResponse = await response.json()
-      setCitations(data.citations || [])
-      setLlmResponse(data.answer || '')
+      // Check if response is event-stream
+      const contentType = response.headers.get('content-type')
+      if (!contentType?.includes('text/event-stream') && !contentType?.includes('application/octet-stream')) {
+        // Fallback to JSON response for non-streaming
+        const data: ChatResponse = await response.json()
+        setCitations(data.citations || [])
+        setLlmResponse(data.answer || '')
+        return
+      }
+
+      // Handle streaming response
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      
+      if (!reader) {
+        throw new Error('No response stream available')
+      }
+
+      let buffer = ''
+      let currentEvent = ''
+      
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          
+          if (done) break
+          
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || '' // Keep incomplete line in buffer
+          
+          for (const line of lines) {
+            if (line.trim() === '') {
+              // Empty line indicates end of event
+              currentEvent = ''
+              continue
+            }
+            
+            if (line.startsWith('event: ')) {
+              currentEvent = line.substring(7).trim()
+              continue
+            }
+            
+            if (line.startsWith('data: ')) {
+              const data = line.substring(6).trim()
+              
+              try {
+                const parsed = JSON.parse(data)
+                
+                if (currentEvent === 'citations' || (parsed.citations && Array.isArray(parsed.citations))) {
+                  setCitations(parsed.citations || [])
+                } else if (currentEvent === 'delta' || parsed.text) {
+                  setLlmResponse(prev => prev + (parsed.text || ''))
+                } else if (currentEvent === 'error' || parsed.message) {
+                  throw new Error(parsed.message || 'Stream error')
+                } else if (currentEvent === 'end' || parsed.done) {
+                  // Stream completed
+                  return
+                } else if (currentEvent === 'start') {
+                  // Stream started - could show initial message
+                  console.log('Stream started:', parsed.message)
+                } else if (currentEvent === 'metadata') {
+                  // Metadata received - could show context stats
+                  console.log('Metadata:', parsed)
+                } else if (currentEvent === 'ping') {
+                  // Heartbeat - ignore
+                  continue
+                }
+              } catch (parseError) {
+                // Skip invalid JSON lines
+                console.debug('Skipping invalid JSON:', data, parseError)
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+
     } catch (err) {
       console.error('Failed to submit query:', err)
       setError(err instanceof Error ? err.message : 'Failed to submit query')
@@ -208,24 +318,44 @@ function DashboardContent() {
                 <h4 className="font-medium mb-2">Citations ({citations.length}):</h4>
                 <div className="space-y-2 max-h-64 overflow-y-auto">
                   {citations.map((citation, index) => (
-                    <CitationModal key={index} citation={citation} index={index}>
-                      <div className="border rounded p-3 bg-muted/50 hover:bg-muted/70 cursor-pointer transition-colors">
-                        <div className="text-sm font-medium mb-1 flex items-center justify-between">
-                          <span>
-                            Source: {citation.location.s3Location.uri.split('/').pop()?.replace('.pdf', '') || 'Unknown'}
-                          </span>
-                          <span className="text-xs text-muted-foreground">
-                            Click to expand
-                          </span>
+                    <div key={index} className="space-y-2">
+                      <CitationModal citation={citation} index={index} onViewInDocument={handleCitationClick}>
+                        <div className="border rounded p-3 bg-muted/50 hover:bg-muted/70 cursor-pointer transition-colors">
+                          <div className="text-sm font-medium mb-1 flex items-center justify-between">
+                            <span>
+                              Source: {citation.location.s3Location.uri.split('/').pop()?.replace('.pdf', '') || 'Unknown'}
+                            </span>
+                            <span className="text-xs text-muted-foreground">
+                              Click to expand
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground mb-2 truncate">
+                            {citation.location.s3Location.uri}
+                          </div>
+                          {citation.page_numbers && citation.page_numbers.length > 0 && (
+                            <div className="text-xs text-blue-600 dark:text-blue-400 mb-2">
+                              Pages: {citation.page_numbers.join(', ')}
+                            </div>
+                          )}
+                          <div className="text-sm">
+                            &quot;{citation.generatedResponsePart.textResponsePart.text.slice(0, 150)}{citation.generatedResponsePart.textResponsePart.text.length > 150 ? '...' : ''}&quot;
+                          </div>
                         </div>
-                        <div className="text-xs text-muted-foreground mb-2 truncate">
-                          {citation.location.s3Location.uri}
-                        </div>
-                        <div className="text-sm">
-                          &quot;{citation.generatedResponsePart.textResponsePart.text.slice(0, 150)}{citation.generatedResponsePart.textResponsePart.text.length > 150 ? '...' : ''}&quot;
-                        </div>
-                      </div>
-                    </CitationModal>
+                      </CitationModal>
+                      {citation.document_id && citation.agency && (
+                        <Button
+                          onClick={() => handleCitationClick(citation)}
+                          variant="outline"
+                          size="sm"
+                          className="w-full text-xs"
+                        >
+                          📄 View in Document
+                          {citation.page_numbers && citation.page_numbers.length > 0 && (
+                            <span className="ml-1">(Page {citation.page_numbers[0]})</span>
+                          )}
+                        </Button>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -235,7 +365,10 @@ function DashboardContent() {
           {/* PDF Viewer */}
           <div className="flex-1 min-h-96">
             {documentUrl ? (
-              <PDFViewer filePath={documentUrl} />
+              <PDFViewer 
+                filePath={documentUrl} 
+                initialPage={initialPage ? parseInt(initialPage) : undefined}
+              />
             ) : (
               <div className="flex items-center justify-center h-64 text-muted-foreground border rounded-lg">
                 Select a document from the sidebar to view it

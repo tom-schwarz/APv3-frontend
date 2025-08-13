@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Document, Page, pdfjs } from "react-pdf"
 import { Button } from "@/components/ui/button"
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react"
@@ -12,17 +12,27 @@ if (typeof window !== 'undefined') {
 
 interface PDFViewerProps {
   filePath: string
+  initialPage?: number
 }
 
-export function PDFViewer({ filePath }: PDFViewerProps) {
+export function PDFViewer({ filePath, initialPage }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number | null>(null)
   const [pageNumber, setPageNumber] = useState(1)
   const [scale, setScale] = useState(1.0)
 
   function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
     setNumPages(numPages)
-    setPageNumber(1)
+    const targetPage = initialPage && initialPage >= 1 && initialPage <= numPages ? initialPage : 1
+    setPageNumber(targetPage)
   }
+
+  // Update page when initialPage prop changes
+  useEffect(() => {
+    if (initialPage && numPages && initialPage >= 1 && initialPage <= numPages) {
+      setPageNumber(initialPage)
+    }
+  }, [initialPage, numPages])
+
 
   const goToPrevPage = () => {
     setPageNumber(prev => Math.max(1, prev - 1))
