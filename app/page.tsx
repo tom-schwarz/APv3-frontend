@@ -20,7 +20,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css"
 import "react-pdf/dist/Page/TextLayer.css"
 import { 
   FileText, 
-  Send, 
+  Send,  
   Quote, 
   User,
   Bot,
@@ -101,6 +101,7 @@ function FunctionalMockupContent() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [documentTree, setDocumentTree] = useState<DocumentTreeNode[]>([])
+  const selectedModel = "anthropic.claude-3-haiku-20240307-v1:0"
   
   // New state for mockup UI
   const [selectedDocument, setSelectedDocument] = useState<string | null>(documentId)
@@ -294,7 +295,8 @@ function FunctionalMockupContent() {
           selected_items: {
             agencies: Array.from(new Set(selectedFiles.map(f => f.agency)))
           },
-          session_id: `session-${Date.now()}`
+          session_id: `session-${Date.now()}`,
+          model_id: selectedModel
         })
       })
 
@@ -656,7 +658,7 @@ function FunctionalMockupContent() {
                           ? "bg-primary text-primary-foreground" 
                           : "bg-muted/50"
                       }`}>
-                        <CardContent className="p-2">
+                        <CardContent className="px-2 py-0">
                           <div className="text-sm whitespace-pre-wrap">
                             {message.content}
                           </div>
@@ -682,7 +684,7 @@ function FunctionalMockupContent() {
                       </Avatar>
                       <Card className="max-w-[80%] bg-muted/50">
                         <CardContent className="p-2">
-                          <div className="space-y-2">
+                          <div className="space-y-0">
                             <div className="text-sm text-muted-foreground">Analyzing documents...</div>
                             <Progress value={undefined} className="h-1" />
                           </div>
