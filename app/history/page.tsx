@@ -247,23 +247,9 @@ function HistoryPageContent() {
 
   return (
     <div className="h-screen flex flex-col bg-background">
-      {/* Header */}
-      <header className="flex h-14 items-center gap-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 px-6">
-        <div className="flex items-center gap-2">
-          <Image
-            src="/360_bulb_logo.png"
-            alt="360 Logo"
-            width={28}
-            height={28}
-            className="rounded-full"
-          />
-          <h1 className="font-semibold">AskPolicy</h1>
-        </div>
-      </header>
-
       {/* Version Selection Bar */}
-      <div className="border-b bg-background px-6 py-4">
-        <div className="flex items-center gap-4 mb-4">
+      <div className="border-b bg-background px-6 py-3">
+        <div className="flex items-center gap-4 mb-3">
           <Button
             variant="outline"
             size="sm"
@@ -272,6 +258,19 @@ function HistoryPageContent() {
             <ArrowLeft className="h-4 w-4 mr-2" />
             Back
           </Button>
+
+          <div className="flex items-center gap-2">
+            <Image
+              src="/360_bulb_logo.png"
+              alt="360 Logo"
+              width={24}
+              height={24}
+              className="rounded-full"
+            />
+            <h1 className="font-semibold text-sm">AskPolicy</h1>
+          </div>
+
+          <div className="h-5 w-px bg-border"></div>
 
           <div className="flex items-center gap-3">
             <History className="h-5 w-5 text-primary" />
@@ -285,7 +284,7 @@ function HistoryPageContent() {
         {/* Timeline */}
         <div className="relative">
           {/* Timeline line */}
-          <div className="absolute top-6 left-0 right-0 h-0.5 bg-border"></div>
+          <div className="absolute top-5 left-0 right-0 h-0.5 bg-border"></div>
 
           {/* Version nodes */}
           <div className="relative flex justify-between items-start">
@@ -298,7 +297,7 @@ function HistoryPageContent() {
                   <button
                     onClick={() => setSelectedVersionId(version.id)}
                     className={`
-                      relative z-10 w-12 h-12 rounded-full border-4
+                      relative z-10 w-10 h-10 rounded-full border-3
                       transition-all duration-200 hover:scale-110
                       ${isSelected
                         ? 'bg-primary border-primary shadow-lg'
@@ -308,16 +307,16 @@ function HistoryPageContent() {
                     title={`View ${version.version}`}
                   >
                     <div className={`flex items-center justify-center h-full ${isSelected ? 'text-white' : 'text-muted-foreground'}`}>
-                      <FileText className="h-5 w-5" />
+                      <FileText className="h-4 w-4" />
                     </div>
                   </button>
 
                   {/* Version label */}
-                  <div className="mt-3 text-center min-w-[80px]">
+                  <div className="mt-2 text-center min-w-[80px]">
                     <div className={`text-xs font-medium ${isSelected ? 'text-primary' : 'text-foreground'}`}>
                       {version.version}
                     </div>
-                    <div className="text-xs text-muted-foreground mt-1">
+                    <div className="text-xs text-muted-foreground mt-0.5">
                       {version.size} KB
                     </div>
                   </div>
@@ -326,26 +325,6 @@ function HistoryPageContent() {
             })}
           </div>
         </div>
-
-        {/* Selected version info */}
-        {selectedVersion && (
-          <div className="mt-4 pt-3 border-t flex items-center gap-6 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="font-medium">Viewing:</span>
-              <span className="text-muted-foreground">{selectedVersion.version} ({selectedVersion.filename})</span>
-            </div>
-            {summary && (
-              <>
-                <div className="h-4 w-px bg-border"></div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">
-                    Showing changes from {summary.oldVersionName} → {summary.newVersionName}
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
-        )}
       </div>
 
       {/* Main Content Area */}
@@ -353,7 +332,7 @@ function HistoryPageContent() {
         {/* PDF Viewer Panel */}
         <ResizablePanel defaultSize={50} minSize={30}>
           <div className="flex flex-col h-full">
-            <div className="p-4 border-b">
+            <div className="px-4 py-2 border-b">
               <h3 className="font-semibold text-sm">
                 {selectedVersion ? `${selectedVersion.version} - ${selectedVersion.filename}` : "No version selected"}
               </h3>
