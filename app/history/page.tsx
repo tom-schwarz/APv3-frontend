@@ -18,8 +18,9 @@ import remarkGfm from 'remark-gfm'
 import "react-pdf/dist/Page/AnnotationLayer.css"
 import "react-pdf/dist/Page/TextLayer.css"
 
-// Import version data
-import versionData from "@/pdf-summaries.json"
+// Import version data with full text
+import versionData from "@/data/pdf-versions-with-text.json"
+import { useDiffChat } from "@/hooks/useDiffChat"
 
 const PDFViewer = dynamic(
   () => import("@/components/pdf-viewer").then(mod => mod.PDFViewer),
@@ -58,6 +59,14 @@ interface Version {
   size: number
 }
 
+interface VersionWithText {
+  id: number
+  version: string
+  filename: string
+  fullText: string
+  textLength: number
+}
+
 interface ChatMessage {
   id: string
   type: 'user' | 'assistant'
@@ -67,6 +76,7 @@ interface ChatMessage {
 
 function HistoryPageContent() {
   const router = useRouter()
+  const { sendMessage, response: llmResponse, isLoading, error: chatError } = useDiffChat()
 
   // Build versions with presigned URLs
   const versions: Version[] = versionData.versions.map(v => ({
@@ -78,9 +88,7 @@ function HistoryPageContent() {
   const [selectedVersionId, setSelectedVersionId] = useState<number>(6) // Default to latest
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [query, setQuery] = useState('')
-  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [llmResponse, setLlmResponse] = useState<string>('')
   const [activeTab, setActiveTab] = useState<'summary' | 'chat'>('summary')
 
   const selectedVersion = versions.find(v => v.id === selectedVersionId)
@@ -98,7 +106,6 @@ function HistoryPageContent() {
 
   const handleNewChat = () => {
     setChatMessages([])
-    setLlmResponse('')
     setError(null)
     setActiveTab('summary')
   }
@@ -122,126 +129,73 @@ function HistoryPageContent() {
       timestamp: new Date().toISOString()
     }
     setChatMessages(prev => [...prev, userMessage])
-
-    setLoading(true)
     setError(null)
-    setLlmResponse('')
+    setActiveTab('chat')
+
+    // Get the full text for the selected version
+    const versionWithText = (versionData.versions as VersionWithText[]).find((v) => v.id === selectedVersionId)
+    const fullText = versionWithText?.fullText || ''
+
+    // Find the previous version for comparison context
+    const previousVersionId = selectedVersionId - 1
+    const previousVersion = previousVersionId > 0
+      ? (versionData.versions as VersionWithText[]).find((v) => v.id === previousVersionId)
+      : null
+
+    // Build comprehensive context prompt
+    let contextPrompt = `# Document Context\n\n`
+    contextPrompt += `**Document:** Workplace Flexibility Policy\n`
+    contextPrompt += `**Agency:** Victoria Police\n`
+    contextPrompt += `**Current Version:** ${selectedVersion.version}\n`
+    contextPrompt += `**Filename:** ${selectedVersion.filename}\n\n`
+
+    if (summary) {
+      contextPrompt += `# Summary of Changes\n\n`
+      contextPrompt += `Changes from ${summary.oldVersionName} to ${summary.newVersionName}:\n\n`
+      contextPrompt += summary.summary + '\n\n'
+    } else {
+      contextPrompt += `# Note\n\nThis is the initial version (${selectedVersion.version}) - there is no previous version to compare against.\n\n`
+    }
+
+    if (previousVersion) {
+      contextPrompt += `# Previous Version (${previousVersion.version})\n\n`
+      contextPrompt += `<previous_version>\n${previousVersion.fullText}\n</previous_version>\n\n`
+    }
+
+    contextPrompt += `# Current Version (${selectedVersion.version})\n\n`
+    contextPrompt += `<current_version>\n${fullText}\n</current_version>\n\n`
+
+    contextPrompt += `---\n\n`
+    contextPrompt += `# User Question\n\n${query}\n\n`
+    contextPrompt += `Please answer the user's question based on the context provided above. Focus on the specific changes, additions, or deletions between the versions if relevant.`
+
+    setQuery('') // Clear input immediately after sending
 
     try {
-      // Lambda function URL (to be created)
-      const apiUrl = process.env.NEXT_PUBLIC_DIFF_CHAT_API_URL || 'https://NOT-YET-CREATED.lambda-url.ap-southeast-2.on.aws/'
-
-      const response = await fetch(apiUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'text/event-stream',
+      // Send message with full context prepended
+      await sendMessage(
+        contextPrompt,
+        {
+          documentTitle: 'Workplace Flexibility Policy',
+          agency: 'Victoria Police',
+          currentVersion: selectedVersion.version,
+          previousVersion: previousVersion?.version,
         },
-        body: JSON.stringify({
-          message: query,
-          version_id: selectedVersionId,
-          version_name: selectedVersion.version,
-          document_filename: selectedVersion.filename,
-          summary_context: summary ? summary.summary : null,
-          session_id: `diff-session-${Date.now()}`,
-          model_id: "anthropic.claude-3-haiku-20240307-v1:0"
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error(`Failed to submit query: ${response.status}`)
-      }
-
-      const contentType = response.headers.get('content-type')
-      if (!contentType?.includes('text/event-stream') && !contentType?.includes('application/octet-stream')) {
-        const data = await response.json()
-        setLlmResponse(data.answer || '')
-
-        // Add assistant message
-        const assistantMessage: ChatMessage = {
-          id: `msg-${Date.now() + 1}`,
-          type: 'assistant',
-          content: data.answer || '',
-          timestamp: new Date().toISOString()
-        }
-        setChatMessages(prev => [...prev, assistantMessage])
-        setActiveTab('chat')
-        return
-      }
-
-      // Handle streaming response
-      const reader = response.body?.getReader()
-      const decoder = new TextDecoder()
-
-      if (!reader) {
-        throw new Error('No response stream available')
-      }
-
-      let buffer = ''
-      let currentEvent = ''
-      let streamingResponse = ''
-
-      try {
-        while (true) {
-          const { done, value } = await reader.read()
-
-          if (done) break
-
-          buffer += decoder.decode(value, { stream: true })
-          const lines = buffer.split('\n')
-          buffer = lines.pop() || ''
-
-          for (const line of lines) {
-            if (line.trim() === '') {
-              currentEvent = ''
-              continue
-            }
-
-            if (line.startsWith('event: ')) {
-              currentEvent = line.substring(7).trim()
-              continue
-            }
-
-            if (line.startsWith('data: ')) {
-              const data = line.substring(6).trim()
-
-              try {
-                const parsed = JSON.parse(data)
-
-                if (currentEvent === 'delta' || parsed.text) {
-                  const newText = parsed.text || ''
-                  streamingResponse += newText
-                  setLlmResponse(streamingResponse)
-                  setActiveTab('chat')
-                } else if (currentEvent === 'error' || parsed.message) {
-                  throw new Error(parsed.message || 'Stream error')
-                } else if (currentEvent === 'end' || parsed.done) {
-                  // Add complete assistant message
-                  const assistantMessage: ChatMessage = {
-                    id: `msg-${Date.now() + 1}`,
-                    type: 'assistant',
-                    content: streamingResponse,
-                    timestamp: new Date().toISOString()
-                  }
-                  setChatMessages(prev => [...prev, assistantMessage])
-                  return
-                }
-              } catch (parseError) {
-                console.debug('Skipping invalid JSON:', data, parseError)
-              }
-            }
+        undefined,
+        (fullResponse) => {
+          // Add the complete assistant message when streaming finishes
+          const assistantMessage: ChatMessage = {
+            id: `msg-${Date.now() + 1}`,
+            type: 'assistant',
+            content: fullResponse,
+            timestamp: new Date().toISOString()
           }
+          setChatMessages(prev => [...prev, assistantMessage])
         }
-      } finally {
-        reader.releaseLock()
-      }
-
+      )
     } catch (err) {
       console.error('Failed to submit query:', err)
       setError(err instanceof Error ? err.message : 'Failed to submit query')
-    } finally {
-      setLoading(false)
-      setQuery('') // Clear input after sending
     }
   }
 
@@ -469,10 +423,18 @@ function HistoryPageContent() {
                                 ? "bg-primary text-primary-foreground"
                                 : "bg-muted/50"
                             }`}>
-                              <CardContent className="px-2 py-0">
-                                <div className="text-sm whitespace-pre-wrap">
-                                  {message.content}
-                                </div>
+                              <CardContent className={message.type === "assistant" ? "p-3" : "px-3 py-2"}>
+                                {message.type === "assistant" ? (
+                                  <div className="prose prose-sm max-w-none dark:prose-invert">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                      {message.content}
+                                    </ReactMarkdown>
+                                  </div>
+                                ) : (
+                                  <div className="text-sm whitespace-pre-wrap">
+                                    {message.content}
+                                  </div>
+                                )}
                               </CardContent>
                             </Card>
 
@@ -486,7 +448,7 @@ function HistoryPageContent() {
                           </div>
                         ))}
 
-                        {loading && (
+                        {isLoading && (
                           <div className="flex gap-3">
                             <Avatar className="h-8 w-8 mt-1">
                               <AvatarFallback>
@@ -513,9 +475,11 @@ function HistoryPageContent() {
                               </AvatarFallback>
                             </Avatar>
                             <Card className="max-w-[80%] bg-muted/50">
-                              <CardContent className="p-2">
-                                <div className="text-sm whitespace-pre-wrap">
-                                  {llmResponse}
+                              <CardContent className="p-3">
+                                <div className="prose prose-sm max-w-none dark:prose-invert">
+                                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                    {llmResponse}
+                                  </ReactMarkdown>
                                 </div>
                               </CardContent>
                             </Card>
@@ -532,13 +496,13 @@ function HistoryPageContent() {
                         placeholder="Ask about this version's changes..."
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && !loading && handleSendMessage()}
-                        disabled={loading}
+                        onKeyDown={(e) => e.key === "Enter" && !isLoading && handleSendMessage()}
+                        disabled={isLoading}
                       />
                       <Button
                         size="icon"
                         onClick={handleSendMessage}
-                        disabled={!query.trim() || loading || !selectedVersion}
+                        disabled={!query.trim() || isLoading || !selectedVersion}
                       >
                         <Send className="h-4 w-4" />
                       </Button>
@@ -553,9 +517,9 @@ function HistoryPageContent() {
                     </div>
 
                     {/* Error Display */}
-                    {error && (
+                    {(error || chatError) && (
                       <div className="mt-2 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-red-700 dark:text-red-300 text-xs">
-                        {error}
+                        {error || chatError}
                       </div>
                     )}
                   </div>
