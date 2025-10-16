@@ -33,7 +33,8 @@ import {
   FolderOpen,
   MessageSquare,
   MoreVertical,
-  RotateCcw
+  RotateCcw,
+  History
 } from "lucide-react"
 
 const PDFViewer = dynamic(
@@ -595,6 +596,14 @@ function FunctionalMockupContent() {
                   )}
                 </div>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push('/history')}
+                  >
+                    <History className="h-3 w-3 mr-1" />
+                    View History
+                  </Button>
                   <Button variant="outline" size="sm">
                     <ExternalLink className="h-3 w-3 mr-1" />
                     Open
