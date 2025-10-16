@@ -5,9 +5,16 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable"
-import { ArrowLeft, History, FileText, MessageSquare } from "lucide-react"
+import { Input } from "@/components/ui/input"
+import { ScrollArea } from "@/components/ui/scroll-area"
+import { Progress } from "@/components/ui/progress"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ArrowLeft, History, FileText, MessageSquare, Send, Bot, User, RotateCcw } from "lucide-react"
 import Image from "next/image"
 import dynamic from "next/dynamic"
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import "react-pdf/dist/Page/AnnotationLayer.css"
 import "react-pdf/dist/Page/TextLayer.css"
 
@@ -51,6 +58,13 @@ interface Version {
   size: number
 }
 
+interface ChatMessage {
+  id: string
+  type: 'user' | 'assistant'
+  content: string
+  timestamp: string
+}
+
 function HistoryPageContent() {
   const router = useRouter()
 
@@ -62,6 +76,12 @@ function HistoryPageContent() {
   }))
 
   const [selectedVersionId, setSelectedVersionId] = useState<number>(6) // Default to latest
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [query, setQuery] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [llmResponse, setLlmResponse] = useState<string>('')
+  const [activeTab, setActiveTab] = useState<'summary' | 'chat'>('summary')
 
   const selectedVersion = versions.find(v => v.id === selectedVersionId)
 
@@ -75,6 +95,155 @@ function HistoryPageContent() {
   }
 
   const summary = getVersionSummary()
+
+  const handleNewChat = () => {
+    setChatMessages([])
+    setLlmResponse('')
+    setError(null)
+    setActiveTab('summary')
+  }
+
+  const handleSendMessage = async () => {
+    if (!query.trim()) {
+      setError('Please enter a query')
+      return
+    }
+
+    if (!selectedVersion) {
+      setError('Please select a version')
+      return
+    }
+
+    // Add user message to chat
+    const userMessage: ChatMessage = {
+      id: `msg-${Date.now()}`,
+      type: 'user',
+      content: query,
+      timestamp: new Date().toISOString()
+    }
+    setChatMessages(prev => [...prev, userMessage])
+
+    setLoading(true)
+    setError(null)
+    setLlmResponse('')
+
+    try {
+      // Lambda function URL (to be created)
+      const apiUrl = process.env.NEXT_PUBLIC_DIFF_CHAT_API_URL || 'https://NOT-YET-CREATED.lambda-url.ap-southeast-2.on.aws/'
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'text/event-stream',
+        },
+        body: JSON.stringify({
+          message: query,
+          version_id: selectedVersionId,
+          version_name: selectedVersion.version,
+          document_filename: selectedVersion.filename,
+          summary_context: summary ? summary.summary : null,
+          session_id: `diff-session-${Date.now()}`,
+          model_id: "anthropic.claude-3-haiku-20240307-v1:0"
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to submit query: ${response.status}`)
+      }
+
+      const contentType = response.headers.get('content-type')
+      if (!contentType?.includes('text/event-stream') && !contentType?.includes('application/octet-stream')) {
+        const data = await response.json()
+        setLlmResponse(data.answer || '')
+
+        // Add assistant message
+        const assistantMessage: ChatMessage = {
+          id: `msg-${Date.now() + 1}`,
+          type: 'assistant',
+          content: data.answer || '',
+          timestamp: new Date().toISOString()
+        }
+        setChatMessages(prev => [...prev, assistantMessage])
+        setActiveTab('chat')
+        return
+      }
+
+      // Handle streaming response
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+
+      if (!reader) {
+        throw new Error('No response stream available')
+      }
+
+      let buffer = ''
+      let currentEvent = ''
+      let streamingResponse = ''
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+
+          if (done) break
+
+          buffer += decoder.decode(value, { stream: true })
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (line.trim() === '') {
+              currentEvent = ''
+              continue
+            }
+
+            if (line.startsWith('event: ')) {
+              currentEvent = line.substring(7).trim()
+              continue
+            }
+
+            if (line.startsWith('data: ')) {
+              const data = line.substring(6).trim()
+
+              try {
+                const parsed = JSON.parse(data)
+
+                if (currentEvent === 'delta' || parsed.text) {
+                  const newText = parsed.text || ''
+                  streamingResponse += newText
+                  setLlmResponse(streamingResponse)
+                  setActiveTab('chat')
+                } else if (currentEvent === 'error' || parsed.message) {
+                  throw new Error(parsed.message || 'Stream error')
+                } else if (currentEvent === 'end' || parsed.done) {
+                  // Add complete assistant message
+                  const assistantMessage: ChatMessage = {
+                    id: `msg-${Date.now() + 1}`,
+                    type: 'assistant',
+                    content: streamingResponse,
+                    timestamp: new Date().toISOString()
+                  }
+                  setChatMessages(prev => [...prev, assistantMessage])
+                  return
+                }
+              } catch (parseError) {
+                console.debug('Skipping invalid JSON:', data, parseError)
+              }
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock()
+      }
+
+    } catch (err) {
+      console.error('Failed to submit query:', err)
+      setError(err instanceof Error ? err.message : 'Failed to submit query')
+    } finally {
+      setLoading(false)
+      setQuery('') // Clear input after sending
+    }
+  }
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -207,80 +376,213 @@ function HistoryPageContent() {
 
         <ResizableHandle withHandle />
 
-        {/* Changes Panel */}
+        {/* Changes & Chat Panel */}
         <ResizablePanel defaultSize={50} minSize={30}>
           <div className="flex flex-col h-full">
-            <div className="p-4 border-b">
-              <div className="flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                <h3 className="font-semibold text-sm">
-                  {summary ? `What's New in ${selectedVersion?.version}` : 'Version Changes'}
-                </h3>
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'summary' | 'chat')} className="flex flex-col h-full">
+              <div className="border-b px-4 pt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <TabsList className="grid grid-cols-2 flex-1">
+                    <TabsTrigger value="summary" className="flex items-center gap-2">
+                      <FileText className="h-4 w-4" />
+                      Summary
+                    </TabsTrigger>
+                    <TabsTrigger value="chat" className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4" />
+                      Chat
+                    </TabsTrigger>
+                  </TabsList>
+                  {chatMessages.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleNewChat}
+                      className="ml-2 h-9"
+                      title="Start a new chat"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-1" />
+                      New Chat
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
 
-            <div className="flex-1 overflow-auto p-4">
-              {summary ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-sm">
-                      Changes from {summary.oldVersionName} to {summary.newVersionName}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
-                      <div className="text-xs text-muted-foreground mb-4">
-                        Analysis generated using {versionData.model}
+              <div className="flex-1 overflow-hidden">
+                <TabsContent value="summary" className="h-full m-0 data-[state=active]:flex">
+                  <div className="flex-1 overflow-auto p-4">
+                    {summary ? (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-sm">
+                            Changes from {summary.oldVersionName} to {summary.newVersionName}
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="text-xs text-muted-foreground mb-4">
+                            Analysis generated using {versionData.model}
+                          </div>
+                          <div className="prose prose-sm max-w-none dark:prose-invert">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {summary.summary}
+                            </ReactMarkdown>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ) : selectedVersionId === 1 ? (
+                      <div className="flex items-center justify-center h-full text-center text-muted-foreground">
+                        <Card className="border-2 border-dashed max-w-md">
+                          <CardContent className="pt-6">
+                            <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                            <p className="text-sm font-semibold mb-2">First Version</p>
+                            <p className="text-xs">
+                              This is the initial version of the policy (October 2018). There are no previous changes to display.
+                            </p>
+                          </CardContent>
+                        </Card>
                       </div>
-                      <div
-                        className="text-sm whitespace-pre-wrap"
-                        style={{ fontSize: '0.875rem', lineHeight: '1.5' }}
-                      >
-                        {summary.summary.split('\n').slice(0, 50).join('\n')}
-                        {summary.summary.split('\n').length > 50 && (
-                          <p className="text-muted-foreground italic mt-4">
-                            ... (Summary truncated for display)
-                          </p>
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-center text-muted-foreground">
+                        <Card className="border-2 border-dashed max-w-md">
+                          <CardContent className="pt-6">
+                            <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                            <p className="text-sm font-semibold mb-2">Change Analysis</p>
+                            <p className="text-xs mb-4">
+                              Select a version from the timeline above to see what changed in that update.
+                            </p>
+                            <div className="text-xs text-left space-y-1">
+                              <p className="font-semibold">Available for each version:</p>
+                              <ul className="list-disc list-inside ml-2 space-y-1">
+                                <li>AI-powered change summaries</li>
+                                <li>Key policy modifications</li>
+                                <li>Procedural updates</li>
+                                <li>Legislative changes</li>
+                              </ul>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="chat" className="h-full flex flex-col m-0 data-[state=active]:flex">
+                  {/* Chat Messages */}
+                  <div className="flex-1 overflow-hidden">
+                    <ScrollArea className="h-full p-2">
+                      <div className="space-y-2">
+                        {chatMessages.map((message) => (
+                          <div
+                            key={message.id}
+                            className={`flex gap-3 ${
+                              message.type === "user" ? "justify-end" : "justify-start"
+                            }`}
+                          >
+                            {message.type === "assistant" && (
+                              <Avatar className="h-8 w-8 mt-1">
+                                <AvatarFallback>
+                                  <Bot className="h-4 w-4" />
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
+
+                            <Card className={`max-w-[80%] ${
+                              message.type === "user"
+                                ? "bg-primary text-primary-foreground"
+                                : "bg-muted/50"
+                            }`}>
+                              <CardContent className="px-2 py-0">
+                                <div className="text-sm whitespace-pre-wrap">
+                                  {message.content}
+                                </div>
+                              </CardContent>
+                            </Card>
+
+                            {message.type === "user" && (
+                              <Avatar className="h-8 w-8 mt-1">
+                                <AvatarFallback>
+                                  <User className="h-4 w-4" />
+                                </AvatarFallback>
+                              </Avatar>
+                            )}
+                          </div>
+                        ))}
+
+                        {loading && (
+                          <div className="flex gap-3">
+                            <Avatar className="h-8 w-8 mt-1">
+                              <AvatarFallback>
+                                <Bot className="h-4 w-4" />
+                              </AvatarFallback>
+                            </Avatar>
+                            <Card className="max-w-[80%] bg-muted/50">
+                              <CardContent className="p-2">
+                                <div className="space-y-0">
+                                  <div className="text-sm text-muted-foreground">Analyzing version...</div>
+                                  <Progress value={undefined} className="h-1" />
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
+                        )}
+
+                        {/* Show streaming response if available */}
+                        {llmResponse && !chatMessages.find(m => m.content === llmResponse) && (
+                          <div className="flex gap-3">
+                            <Avatar className="h-8 w-8 mt-1">
+                              <AvatarFallback>
+                                <Bot className="h-4 w-4" />
+                              </AvatarFallback>
+                            </Avatar>
+                            <Card className="max-w-[80%] bg-muted/50">
+                              <CardContent className="p-2">
+                                <div className="text-sm whitespace-pre-wrap">
+                                  {llmResponse}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          </div>
                         )}
                       </div>
+                    </ScrollArea>
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className="border-t p-4 bg-background">
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="Ask about this version's changes..."
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && !loading && handleSendMessage()}
+                        disabled={loading}
+                      />
+                      <Button
+                        size="icon"
+                        onClick={handleSendMessage}
+                        disabled={!query.trim() || loading || !selectedVersion}
+                      >
+                        <Send className="h-4 w-4" />
+                      </Button>
                     </div>
-                  </CardContent>
-                </Card>
-              ) : selectedVersionId === 1 ? (
-                <div className="flex items-center justify-center h-full text-center text-muted-foreground">
-                  <Card className="border-2 border-dashed max-w-md">
-                    <CardContent className="pt-6">
-                      <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p className="text-sm font-semibold mb-2">First Version</p>
-                      <p className="text-xs">
-                        This is the initial version of the policy (October 2018). There are no previous changes to display.
-                      </p>
-                    </CardContent>
-                  </Card>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center h-full text-center text-muted-foreground">
-                  <Card className="border-2 border-dashed max-w-md">
-                    <CardContent className="pt-6">
-                      <MessageSquare className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p className="text-sm font-semibold mb-2">Change Analysis</p>
-                      <p className="text-xs mb-4">
-                        Select a version from the timeline above to see what changed in that update.
-                      </p>
-                      <div className="text-xs text-left space-y-1">
-                        <p className="font-semibold">Available for each version:</p>
-                        <ul className="list-disc list-inside ml-2 space-y-1">
-                          <li>AI-powered change summaries</li>
-                          <li>Key policy modifications</li>
-                          <li>Procedural updates</li>
-                          <li>Legislative changes</li>
-                        </ul>
+
+                    <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <MessageSquare className="h-3 w-3" />
+                      <span>
+                        Chat about {selectedVersion?.version}
+                        {summary && ` (${summary.oldVersionName} → ${summary.newVersionName})`}
+                      </span>
+                    </div>
+
+                    {/* Error Display */}
+                    {error && (
+                      <div className="mt-2 p-2 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded text-red-700 dark:text-red-300 text-xs">
+                        {error}
                       </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              )}
-            </div>
+                    )}
+                  </div>
+                </TabsContent>
+              </div>
+            </Tabs>
           </div>
         </ResizablePanel>
       </ResizablePanelGroup>
