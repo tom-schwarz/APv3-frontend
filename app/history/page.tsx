@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, Suspense } from "react"
+import { useState, useEffect, useMemo, Suspense } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -30,16 +30,8 @@ const PDFViewer = dynamic(
   }
 )
 
-// Presigned URLs (valid for 7 days from Oct 16, 2025)
-// Note: For production, these should be generated via Lambda or API route
-const PRESIGNED_URLS: Record<string, string> = {
-  "VPM_Workplace_flexibility-1810.pdf": "https://apv2-askpolicy-diff-docs-ap-southeast-2.s3.ap-southeast-2.amazonaws.com/victoria-police/workplace-flexibility/VPM_Workplace_flexibility-1810.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIATMYACQ2YIKI3KXZF%2F20251016%2Fap-southeast-2%2Fs3%2Faws4_request&X-Amz-Date=20251016T012627Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Security-Token=IQoJb3JpZ2luX2VjENn%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDmFwLXNvdXRoZWFzdC0yIkcwRQIhAKuJYwuxcUeQaDXJOSdbCyXmClP6fqQs7ypwQVZRQkerAiBvSjSmXvttamLHetuF1GRjj6Ao%2B%2BtKj2FU6sRIPfFNgCq1AwiD%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDIzMzUzOTAxMjI3MiIMEYGba1woXUjOKr4AKokDo4UFwLnq7jFH7q3bwD5F8aktX8U8Nz6oVbFGgFpxK67mkCExavzBk6hjRyTknT27zpTsVDkGSyEFt433dWNVWdsH%2Bv3QB5o0Lqkl6k4v5lpdAyAjd9daXEHUO64CCIr6vTs56j1z%2F2LXR3TfufSdB%2B2f%2Be0s3C1JQmj4PrCu8ih2iD7oLjmvEH0t6cayoXwx04fOzj7OHWjwYUrKEXnq9SUfqpbeFmvyB5GrZkCHecebWMGUolJ6zzBZf0L%2FbgE8jOujDN2iFx8b3hHIfLMbLXlSBCg5yZn%2F2D6KfapBInFYi2g%2BdHI%2FvWTXr83Xhpbq0XdcAHaCPp3zMMMxP46IdBnOsiHZBGfvaFI7uE9HD0EHFRHlXrJgJ49IIIZ7eB87q1pJrs3ZV%2FVJWnb5j%2FkbqWe3xfjlVbwJx8UdCCFRELecqL8IY3pzz%2Bs6E8uXeK6kY1BfWpUCdkwMFqPFvr04NqDuqEzZLNXlqp0OrXALMgsn1uj4OEp7hzJQW714Ku9PDjabGuQ%2BLzQnMJeSwccGOqYBywwE%2FblcMUXKeR8bYNQoa%2F2jKj2eHvVcSiIZtaRM31moXPq3JXOQJdkZDflu8D2gvfy52TPQUAHdO6nKqYGSVEOdBpv10q3HteujlhuPjt0M9Yq7J1H81LG7uU1W8foduvrUKSYgndo5Jpu%2FexBk3alnKvHhGP7YSiBmoqvGmc80CxqHLqo2no9GZWW7d5ceBnTvGGspRJC7gY%2BBZ7ATFEu3fSqViA%3D%3D&X-Amz-Signature=49db097ffca56c4c058911a872d34a975e4ea7b5d9c55ac0b75e7a69f97f0553",
-  "VPM_Workplace_flexibility-1910.pdf": "https://apv2-askpolicy-diff-docs-ap-southeast-2.s3.ap-southeast-2.amazonaws.com/victoria-police/workplace-flexibility/VPM_Workplace_flexibility-1910.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIATMYACQ2YIKI3KXZF%2F20251016%2Fap-southeast-2%2Fs3%2Faws4_request&X-Amz-Date=20251016T012628Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Security-Token=IQoJb3JpZ2luX2VjENn%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDmFwLXNvdXRoZWFzdC0yIkcwRQIhAKuJYwuxcUeQaDXJOSdbCyXmClP6fqQs7ypwQVZRQkerAiBvSjSmXvttamLHetuF1GRjj6Ao%2B%2BtKj2FU6sRIPfFNgCq1AwiD%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDIzMzUzOTAxMjI3MiIMEYGba1woXUjOKr4AKokDo4UFwLnq7jFH7q3bwD5F8aktX8U8Nz6oVbFGgFpxK67mkCExavzBk6hjRyTknT27zpTsVDkGSyEFt433dWNVWdsH%2Bv3QB5o0Lqkl6k4v5lpdAyAjd9daXEHUO64CCIr6vTs56j1z%2F2LXR3TfufSdB%2B2f%2Be0s3C1JQmj4PrCu8ih2iD7oLjmvEH0t6cayoXwx04fOzj7OHWjwYUrKEXnq9SUfqpbeFmvyB5GrZkCHecebWMGUolJ6zzBZf0L%2FbgE8jOujDN2iFx8b3hHIfLMbLXlSBCg5yZn%2F2D6KfapBInFYi2g%2BdHI%2FvWTXr83Xhpbq0XdcAHaCPp3zMMMxP46IdBnOsiHZBGfvaFI7uE9HD0EHFRHlXrJgJ49IIIZ7eB87q1pJrs3ZV%2FVJWnb5j%2FkbqWe3xfjlVbwJx8UdCCFRELecqL8IY3pzz%2Bs6E8uXeK6kY1BfWpUCdkwMFqPFvr04NqDuqEzZLNXlqp0OrXALMgsn1uj4OEp7hzJQW714Ku9PDjabGuQ%2BLzQnMJeSwccGOqYBywwE%2FblcMUXKeR8bYNQoa%2F2jKj2eHvVcSiIZtaRM31moXPq3JXOQJdkZDflu8D2gvfy52TPQUAHdO6nKqYGSVEOdBpv10q3HteujlhuPjt0M9Yq7J1H81LG7uU1W8foduvrUKSYgndo5Jpu%2FexBk3alnKvHhGP7YSiBmoqvGmc80CxqHLqo2no9GZWW7d5ceBnTvGGspRJC7gY%2BBZ7ATFEu3fSqViA%3D%3D&X-Amz-Signature=ea131a002c7bed9666269f363da5e4b7eed29c88abcde20d3818a8c0bcb5e37e",
-  "VPM_Workplace_flexibility-2010.pdf": "https://apv2-askpolicy-diff-docs-ap-southeast-2.s3.ap-southeast-2.amazonaws.com/victoria-police/workplace-flexibility/VPM_Workplace_flexibility-2010.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIATMYACQ2YIKI3KXZF%2F20251016%2Fap-southeast-2%2Fs3%2Faws4_request&X-Amz-Date=20251016T012628Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Security-Token=IQoJb3JpZ2luX2VjENn%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDmFwLXNvdXRoZWFzdC0yIkcwRQIhAKuJYwuxcUeQaDXJOSdbCyXmClP6fqQs7ypwQVZRQkerAiBvSjSmXvttamLHetuF1GRjj6Ao%2B%2BtKj2FU6sRIPfFNgCq1AwiD%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDIzMzUzOTAxMjI3MiIMEYGba1woXUjOKr4AKokDo4UFwLnq7jFH7q3bwD5F8aktX8U8Nz6oVbFGgFpxK67mkCExavzBk6hjRyTknT27zpTsVDkGSyEFt433dWNVWdsH%2Bv3QB5o0Lqkl6k4v5lpdAyAjd9daXEHUO64CCIr6vTs56j1z%2F2LXR3TfufSdB%2B2f%2Be0s3C1JQmj4PrCu8ih2iD7oLjmvEH0t6cayoXwx04fOzj7OHWjwYUrKEXnq9SUfqpbeFmvyB5GrZkCHecebWMGUolJ6zzBZf0L%2FbgE8jOujDN2iFx8b3hHIfLMbLXlSBCg5yZn%2F2D6KfapBInFYi2g%2BdHI%2FvWTXr83Xhpbq0XdcAHaCPp3zMMMxP46IdBnOsiHZBGfvaFI7uE9HD0EHFRHlXrJgJ49IIIZ7eB87q1pJrs3ZV%2FVJWnb5j%2FkbqWe3xfjlVbwJx8UdCCFRELecqL8IY3pzz%2Bs6E8uXeK6kY1BfWpUCdkwMFqPFvr04NqDuqEzZLNXlqp0OrXALMgsn1uj4OEp7hzJQW714Ku9PDjabGuQ%2BLzQnMJeSwccGOqYBywwE%2FblcMUXKeR8bYNQoa%2F2jKj2eHvVcSiIZtaRM31moXPq3JXOQJdkZDflu8D2gvfy52TPQUAHdO6nKqYGSVEOdBpv10q3HteujlhuPjt0M9Yq7J1H81LG7uU1W8foduvrUKSYgndo5Jpu%2FexBk3alnKvHhGP7YSiBmoqvGmc80CxqHLqo2no9GZWW7d5ceBnTvGGspRJC7gY%2BBZ7ATFEu3fSqViA%3D%3D&X-Amz-Signature=30c868b0045b79a8a1fa35a9734523c6ae62e5171e0b02ffe1efb2dfbf63292c",
-  "VPM_Workplace_flexibility-2107.pdf": "https://apv2-askpolicy-diff-docs-ap-southeast-2.s3.ap-southeast-2.amazonaws.com/victoria-police/workplace-flexibility/VPM_Workplace_flexibility-2107.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIATMYACQ2YIKI3KXZF%2F20251016%2Fap-southeast-2%2Fs3%2Faws4_request&X-Amz-Date=20251016T012628Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Security-Token=IQoJb3JpZ2luX2VjENn%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDmFwLXNvdXRoZWFzdC0yIkcwRQIhAKuJYwuxcUeQaDXJOSdbCyXmClP6fqQs7ypwQVZRQkerAiBvSjSmXvttamLHetuF1GRjj6Ao%2B%2BtKj2FU6sRIPfFNgCq1AwiD%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDIzMzUzOTAxMjI3MiIMEYGba1woXUjOKr4AKokDo4UFwLnq7jFH7q3bwD5F8aktX8U8Nz6oVbFGgFpxK67mkCExavzBk6hjRyTknT27zpTsVDkGSyEFt433dWNVWdsH%2Bv3QB5o0Lqkl6k4v5lpdAyAjd9daXEHUO64CCIr6vTs56j1z%2F2LXR3TfufSdB%2B2f%2Be0s3C1JQmj4PrCu8ih2iD7oLjmvEH0t6cayoXwx04fOzj7OHWjwYUrKEXnq9SUfqpbeFmvyB5GrZkCHecebWMGUolJ6zzBZf0L%2FbgE8jOujDN2iFx8b3hHIfLMbLXlSBCg5yZn%2F2D6KfapBInFYi2g%2BdHI%2FvWTXr83Xhpbq0XdcAHaCPp3zMMMxP46IdBnOsiHZBGfvaFI7uE9HD0EHFRHlXrJgJ49IIIZ7eB87q1pJrs3ZV%2FVJWnb5j%2FkbqWe3xfjlVbwJx8UdCCFRELecqL8IY3pzz%2Bs6E8uXeK6kY1BfWpUCdkwMFqPFvr04NqDuqEzZLNXlqp0OrXALMgsn1uj4OEp7hzJQW714Ku9PDjabGuQ%2BLzQnMJeSwccGOqYBywwE%2FblcMUXKeR8bYNQoa%2F2jKj2eHvVcSiIZtaRM31moXPq3JXOQJdkZDflu8D2gvfy52TPQUAHdO6nKqYGSVEOdBpv10q3HteujlhuPjt0M9Yq7J1H81LG7uU1W8foduvrUKSYgndo5Jpu%2FexBk3alnKvHhGP7YSiBmoqvGmc80CxqHLqo2no9GZWW7d5ceBnTvGGspRJC7gY%2BBZ7ATFEu3fSqViA%3D%3D&X-Amz-Signature=ea99bbe42ad0fdc4e0410cb9064ab21eb5f307926122a0d25c1e2ee66bf65ab0",
-  "VPM_Workplace_flexibility-2207.pdf": "https://apv2-askpolicy-diff-docs-ap-southeast-2.s3.ap-southeast-2.amazonaws.com/victoria-police/workplace-flexibility/VPM_Workplace_flexibility-2207.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIATMYACQ2YIKI3KXZF%2F20251016%2Fap-southeast-2%2Fs3%2Faws4_request&X-Amz-Date=20251016T012628Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Security-Token=IQoJb3JpZ2luX2VjENn%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDmFwLXNvdXRoZWFzdC0yIkcwRQIhAKuJYwuxcUeQaDXJOSdbCyXmClP6fqQs7ypwQVZRQkerAiBvSjSmXvttamLHetuF1GRjj6Ao%2B%2BtKj2FU6sRIPfFNgCq1AwiD%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDIzMzUzOTAxMjI3MiIMEYGba1woXUjOKr4AKokDo4UFwLnq7jFH7q3bwD5F8aktX8U8Nz6oVbFGgFpxK67mkCExavzBk6hjRyTknT27zpTsVDkGSyEFt433dWNVWdsH%2Bv3QB5o0Lqkl6k4v5lpdAyAjd9daXEHUO64CCIr6vTs56j1z%2F2LXR3TfufSdB%2B2f%2Be0s3C1JQmj4PrCu8ih2iD7oLjmvEH0t6cayoXwx04fOzj7OHWjwYUrKEXnq9SUfqpbeFmvyB5GrZkCHecebWMGUolJ6zzBZf0L%2FbgE8jOujDN2iFx8b3hHIfLMbLXlSBCg5yZn%2F2D6KfapBInFYi2g%2BdHI%2FvWTXr83Xhpbq0XdcAHaCPp3zMMMxP46IdBnOsiHZBGfvaFI7uE9HD0EHFRHlXrJgJ49IIIZ7eB87q1pJrs3ZV%2FVJWnb5j%2FkbqWe3xfjlVbwJx8UdCCFRELecqL8IY3pzz%2Bs6E8uXeK6kY1BfWpUCdkwMFqPFvr04NqDuqEzZLNXlqp0OrXALMgsn1uj4OEp7hzJQW714Ku9PDjabGuQ%2BLzQnMJeSwccGOqYBywwE%2FblcMUXKeR8bYNQoa%2F2jKj2eHvVcSiIZtaRM31moXPq3JXOQJdkZDflu8D2gvfy52TPQUAHdO6nKqYGSVEOdBpv10q3HteujlhuPjt0M9Yq7J1H81LG7uU1W8foduvrUKSYgndo5Jpu%2FexBk3alnKvHhGP7YSiBmoqvGmc80CxqHLqo2no9GZWW7d5ceBnTvGGspRJC7gY%2BBZ7ATFEu3fSqViA%3D%3D&X-Amz-Signature=fd92b61ff719bf7a16eab1ecd89d47e758a532607f5d7850572ca87e8c4f4aa1",
-  "VPM_Workplace_flexibility-latest.pdf": "https://apv2-askpolicy-diff-docs-ap-southeast-2.s3.ap-southeast-2.amazonaws.com/victoria-police/workplace-flexibility/VPM_Workplace_flexibility-latest.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=ASIATMYACQ2YIKI3KXZF%2F20251016%2Fap-southeast-2%2Fs3%2Faws4_request&X-Amz-Date=20251016T012629Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Security-Token=IQoJb3JpZ2luX2VjENn%2F%2F%2F%2F%2F%2F%2F%2F%2F%2FwEaDmFwLXNvdXRoZWFzdC0yIkcwRQIhAKuJYwuxcUeQaDXJOSdbCyXmClP6fqQs7ypwQVZRQkerAiBvSjSmXvttamLHetuF1GRjj6Ao%2B%2BtKj2FU6sRIPfFNgCq1AwiD%2F%2F%2F%2F%2F%2F%2F%2F%2F%2F8BEAAaDDIzMzUzOTAxMjI3MiIMEYGba1woXUjOKr4AKokDo4UFwLnq7jFH7q3bwD5F8aktX8U8Nz6oVbFGgFpxK67mkCExavzBk6hjRyTknT27zpTsVDkGSyEFt433dWNVWdsH%2Bv3QB5o0Lqkl6k4v5lpdAyAjd9daXEHUO64CCIr6vTs56j1z%2F2LXR3TfufSdB%2B2f%2Be0s3C1JQmj4PrCu8ih2iD7oLjmvEH0t6cayoXwx04fOzj7OHWjwYUrKEXnq9SUfqpbeFmvyB5GrZkCHecebWMGUolJ6zzBZf0L%2FbgE8jOujDN2iFx8b3hHIfLMbLXlSBCg5yZn%2F2D6KfapBInFYi2g%2BdHI%2FvWTXr83Xhpbq0XdcAHaCPp3zMMMxP46IdBnOsiHZBGfvaFI7uE9HD0EHFRHlXrJgJ49IIIZ7eB87q1pJrs3ZV%2FVJWnb5j%2FkbqWe3xfjlVbwJx8UdCCFRELecqL8IY3pzz%2Bs6E8uXeK6kY1BfWpUCdkwMFqPFvr04NqDuqEzZLNXlqp0OrXALMgsn1uj4OEp7hzJQW714Ku9PDjabGuQ%2BLzQnMJeSwccGOqYBywwE%2FblcMUXKeR8bYNQoa%2F2jKj2eHvVcSiIZtaRM31moXPq3JXOQJdkZDflu8D2gvfy52TPQUAHdO6nKqYGSVEOdBpv10q3HteujlhuPjt0M9Yq7J1H81LG7uU1W8foduvrUKSYgndo5Jpu%2FexBk3alnKvHhGP7YSiBmoqvGmc80CxqHLqo2no9GZWW7d5ceBnTvGGspRJC7gY%2BBZ7ATFEu3fSqViA%3D%3D&X-Amz-Signature=fb49ddae53551a3a07b68672db4b0154505ac5d86414535b8f0f0271c5462ac7",
-}
+// History server Lambda URL - generates fresh presigned URLs or serves PDFs directly
+const HISTORY_SERVER_URL = process.env.NEXT_PUBLIC_HISTORY_SERVER_URL || 'https://7efcvnqehvpm2qhkl23c45ic540huhgk.lambda-url.ap-southeast-2.on.aws/'
 
 // Version metadata with sizes (from reference guide)
 const VERSION_SIZES: Record<string, number> = {
@@ -78,20 +70,55 @@ function HistoryPageContent() {
   const router = useRouter()
   const { sendMessage, response: llmResponse, isLoading, error: chatError } = useDiffChat()
 
-  // Build versions with presigned URLs
-  const versions: Version[] = versionData.versions.map(v => ({
+  // Build versions with Lambda URLs (memoized to prevent infinite loops)
+  const versions: Version[] = useMemo(() => versionData.versions.map(v => ({
     ...v,
-    url: PRESIGNED_URLS[v.filename] || '',
+    url: `${HISTORY_SERVER_URL}${v.filename}`,
     size: VERSION_SIZES[v.filename] || 0
-  }))
+  })), [])
 
   const [selectedVersionId, setSelectedVersionId] = useState<number>(6) // Default to latest
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [query, setQuery] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'summary' | 'chat'>('summary')
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+  const [loadingPdf, setLoadingPdf] = useState(false)
 
   const selectedVersion = versions.find(v => v.id === selectedVersionId)
+
+  // Fetch presigned URL when selected version ID changes
+  useEffect(() => {
+    if (!selectedVersionId) {
+      setPdfUrl(null)
+      return
+    }
+
+    const version = versions.find(v => v.id === selectedVersionId)
+    if (!version) {
+      setPdfUrl(null)
+      return
+    }
+
+    const fetchPresignedUrl = async () => {
+      setLoadingPdf(true)
+      try {
+        const response = await fetch(version.url)
+        if (!response.ok) {
+          throw new Error(`Failed to fetch presigned URL: ${response.status}`)
+        }
+        const data = await response.json()
+        setPdfUrl(data.url)
+      } catch (err) {
+        console.error('Error fetching presigned URL:', err)
+        setError(err instanceof Error ? err.message : 'Failed to load PDF')
+      } finally {
+        setLoadingPdf(false)
+      }
+    }
+
+    fetchPresignedUrl()
+  }, [selectedVersionId, versions])
 
   // Find summary for the selected version (changes from previous version)
   const getVersionSummary = () => {
@@ -293,8 +320,22 @@ function HistoryPageContent() {
             </div>
 
             <div className="flex-1 overflow-hidden">
-              {selectedVersion ? (
-                <PDFViewer filePath={selectedVersion.url} />
+              {loadingPdf ? (
+                <div className="flex items-center justify-center h-full text-center text-muted-foreground bg-muted/30">
+                  <div>
+                    <Progress value={undefined} className="w-48 h-2 mb-4" />
+                    <p>Loading PDF...</p>
+                  </div>
+                </div>
+              ) : pdfUrl ? (
+                <PDFViewer filePath={pdfUrl} />
+              ) : selectedVersion ? (
+                <div className="flex items-center justify-center h-full text-center text-muted-foreground bg-muted/30">
+                  <div>
+                    <FileText className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>Failed to load PDF</p>
+                  </div>
+                </div>
               ) : (
                 <div className="flex items-center justify-center h-full text-center text-muted-foreground bg-muted/30">
                   <div>
