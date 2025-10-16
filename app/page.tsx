@@ -18,10 +18,10 @@ import dynamic from "next/dynamic"
 import Image from "next/image"
 import "react-pdf/dist/Page/AnnotationLayer.css"
 import "react-pdf/dist/Page/TextLayer.css"
-import { 
-  FileText, 
-  Send,  
-  Quote, 
+import {
+  FileText,
+  Send,
+  Quote,
   User,
   Bot,
   Search,
@@ -32,7 +32,8 @@ import {
   Folder,
   FolderOpen,
   MessageSquare,
-  MoreVertical
+  MoreVertical,
+  RotateCcw
 } from "lucide-react"
 
 const PDFViewer = dynamic(
@@ -231,6 +232,13 @@ function FunctionalMockupContent() {
     setExpandedAgencies(newExpanded)
   }
 
+  const handleNewChat = () => {
+    setChatMessages([])
+    setCitations([])
+    setLlmResponse('')
+    setError(null)
+    setActiveTab('chat')
+  }
 
   // const handleSelectionChange = (files: SelectedFile[]) => {
   //   setSelectedFiles(files)
@@ -620,16 +628,30 @@ function FunctionalMockupContent() {
           <div className="flex flex-col h-full">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="flex flex-col h-full">
               <div className="border-b px-4 pt-4">
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="chat" className="flex items-center gap-2">
-                    <MessageSquare className="h-4 w-4" />
-                    Chat
-                  </TabsTrigger>
-                  <TabsTrigger value="citations" className="flex items-center gap-2">
-                    <Quote className="h-4 w-4" />
-                    Citations ({citations.length})
-                  </TabsTrigger>
-                </TabsList>
+                <div className="flex items-center justify-between mb-2">
+                  <TabsList className="grid grid-cols-2 flex-1">
+                    <TabsTrigger value="chat" className="flex items-center gap-2">
+                      <MessageSquare className="h-4 w-4" />
+                      Chat
+                    </TabsTrigger>
+                    <TabsTrigger value="citations" className="flex items-center gap-2">
+                      <Quote className="h-4 w-4" />
+                      Citations ({citations.length})
+                    </TabsTrigger>
+                  </TabsList>
+                  {chatMessages.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleNewChat}
+                      className="ml-2 h-9"
+                      title="Start a new chat"
+                    >
+                      <RotateCcw className="h-4 w-4 mr-1" />
+                      New Chat
+                    </Button>
+                  )}
+                </div>
               </div>
 
               <div className="flex-1 overflow-hidden">
